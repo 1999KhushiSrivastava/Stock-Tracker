@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stock Tracker</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    canvas { max-width: 800px; margin: 20px auto; display: block; }
+    table { border-collapse: collapse; width: 80%; margin: 20px auto; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    #alerts-log { margin-top: 20px; color: red; }
+  </style>
+</head>
+<body>
+  <h1>📈 Stock Tracker</h1>
+  <canvas id="stockChart"></canvas>
+  
+  <h2>Live Prices</h2>
+  <table id="prices-table">
+    <thead>
+      <tr><th>Symbol</th><th>Price</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Set Stock Alert</h2>
+  <form id="alert-form">
+    <label>
+      Symbol:
+      <select id="alert-symbol">
+        <option value="AAPL">AAPL</option>
+        <option value="GOOGL">GOOGL</option>
+        <option value="MSFT">MSFT</option>
+      </select>
+    </label>
+    <label>
+      Threshold Price:
+      <input type="number" id="alert-threshold" required />
+    </label>
+    <button type="submit">Set Alert</button>
+  </form>
+  <div id="alerts-log"></div>
+
+  <script>
+    const socket = io("http://localhost:3000");
+    const symbols = ["AAPL", "GOOGL", "MSFT"];
+    const colors = { AAPL: "red", GOOGL: "blue", MSFT: "green" };
+
+    const datasets = symbols.map(s => ({
+      label: s,
+      data: [],
+      borderColor: colors[s],
+      fill: false
+    }));
+
+    const chart = new Chart(document.getElementById("stockChart"), {
+      type: "line",
+      data: { labels: [], datasets },
+      options: {
+        responsive: true,
+        animation: false,
+        scales: {
+          x: { title: { display: true, text: "Time" } },
+          y: { title: { display: true, text: "Price ($)" } }
+        }
+      }
+    });
+
+    // Update price table
+    function updateTable(symbol, price) {
+      const tbody = document.querySelector("#prices-table tbody");
+      let row = document.getElementById(`row-${symbol}`);
+      if (!row) {
+        row = document.createElement("tr");
+        row.id = `row-${symbol}`;
+        row.innerHTML = `<td>${symbol}</td><td id="price-${symbol}">-</td>`;
+        tbody.appendChild(row);
+      }
+      document.getElementById(`price-${symbol}`).textContent = price.toFixed(2);
+    }
+
+    // Socket listeners
+    socket.on("update", ({ symbol, price, timestamp }) => {
+      console.log("Update:", symbol, price);
+
+      const t = new Date(timestamp).toLocaleTimeString();
+      if (!chart.data.labels.includes(t)) chart.data.labels.push(t);
+      const ds = chart.data.datasets.find(d => d.label === symbol);
+      if (ds) ds.data.push(price);
+      if (chart.data.labels.length > 20) {
+        chart.data.labels.shift();
+        chart.data.datasets.forEach(d => d.data.shift());
+      }
+      chart.update();
+
+      updateTable(symbol, price);
+    });
+
+    socket.on("alert", (data) => {
+      console.log("ALERT:", data);
+      alert(data.message);
+      const log = document.getElementById("alerts-log");
+      const entry = document.createElement("p");
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${data.message}`;
+      log.appendChild(entry);
+    });
+
+    // Set alert
+    document.getElementById("alert-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const symbol = document.getElementById("alert-symbol").value;
+      const threshold = document.getElementById("alert-threshold").value;
+      try {
+        await fetch("http://localhost:3000/alert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol, threshold })
+        });
+        alert(`✅ Alert set for ${symbol} at $${threshold}`);
+      } catch (err) {
+        console.error("Error setting alert:", err);
+      }
+    });
+  </script>
+</body>
+</html>
